@@ -39,7 +39,7 @@ class DDPG_ROS(Node):
 
         self.thrust_cmd = [0,0]
         ##setting mode
-        self.training = True
+        self.training = False
 
 
         state = {
@@ -57,7 +57,7 @@ class DDPG_ROS(Node):
         self.error_state = self.flatten_state(error_state)
 
         
-        self.model = SiamesePoseControlNet(current_pose_dim = len(self.state), goal_pose_dim = len(self.error_state))
+        self.model = SiamesePoseControlNet(current_pose_dim = len(self.state), goal_pose_dim = len(self.error_state), latent_dim = 64)
 
         if self.training:
             self.thruster_sub = self.create_subscription(Float64MultiArray, '/mvp2_test_robot/stonefish/thruster_command', self.thruster_callback, 1)
@@ -68,11 +68,11 @@ class DDPG_ROS(Node):
         else:
             self.thruster_pub = self.create_publisher(Float64MultiArray, '/mvp2_test_robot/stonefish/thruster_command', 5)
 
-            self.model.load_state_dict(torch.load("siamese_pose_control_net.pth"))
+            self.model.load_state_dict(torch.load("siamese_05-03.pth"))
             self.model.eval()
 
-        self.timer_pub = self.create_timer(0.5, self.step)
-        self.timer_setpoint_pub = self.create_timer(5, self.set_point_update)
+        self.timer_pub = self.create_timer(0.2, self.step)
+        self.timer_setpoint_pub = self.create_timer(30, self.set_point_update)
 
         self.set_controller = self.create_client(SetBool, '/mvp2_test_robot/controller/set')  
         self.active_controller(True)

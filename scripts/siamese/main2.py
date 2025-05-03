@@ -10,6 +10,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 from std_msgs.msg import Float64, Float64MultiArray
 import torch
+from collections import deque
 
 class DDPG_ROS(Node):
     def __init__(self):
@@ -41,6 +42,8 @@ class DDPG_ROS(Node):
         ##setting mode
         self.training = True
 
+        self.buffer = deque(maxlen=10000)  # or any reasonable size
+        self.batch_size = 32
 
         state = {
             'z': (0),
@@ -90,7 +93,7 @@ class DDPG_ROS(Node):
     def set_point_update(self):
         self.set_point.position.z = random.uniform(-5,-1)
         self.set_point.orientation.z = random.uniform(-3.14, 3.14)
-        self.set_point.velocity.x = random.uniform(-0.3, 0.3)
+        self.set_point.velocity.x = random.uniform(0.0, 0.3)
         # self.set_point_pub.publish(self.set_point)
         # print(f"desired depth = {self.set_point.position.z}")
     
@@ -148,17 +151,28 @@ class DDPG_ROS(Node):
 
             current_pose = torch.tensor(self.state, dtype=torch.float32).unsqueeze(0)
             error_pose = torch.tensor(self.error_state, dtype=torch.float32).unsqueeze(0)
+            thrust_cmd = torch.tensor(self.thrust_cmd[0], dtype=torch.float32).unsqueeze(0)
+            # print(thrust_cmd)
+            pred_thrust_cmd = self.model(current_pose, error_pose)
+            self.buffer.append((thrust_cmd, pred_thrust_cmd))
+            
+            if self.training: 
+                if len(self.buffer)>=self.batch_size:
+                    thrust_batch = torch.stack([item[0] for item in self.buffer])
+                    thrust_pred_batch = torch.stack([item[1] for item in self.buffer])
+                    loss = self.trainer.train(thrust_pred_batch, thrust_batch)
 
-            if self.training:
-                pred_thrust_cmd = self.model(current_pose, error_pose)
-                print(pred_thrust_cmd.tolist())
-                print(self.thrust_cmd[0])
-                loss = self.trainer.train(pred_thrust_cmd, self.thrust_cmd[0])
+                    # pred_thrust_cmd = self.model(current_pose, error_pose)
+                    # print(pred_thrust_cmd.tolist())
+                    # print(self.thrust_cmd[0])
+                    # loss = self.trainer.train(pred_thrust_cmd, self.thrust_cmd[0])
+                    # loss = self.trainer.train(pred_thrust_cmd, thrust_cmd[0])
 
-                # print(f"Training loss: {loss}")
-                data = Float64()
-                data.data = float(loss)
-                self.loss_pub.publish(data)
+                    print(f"Training loss: {loss}")
+                    data = Float64()
+                    data.data = float(loss)
+                    self.loss_pub.publish(data)
+                    self.buffer.clear()
             else:
             #inference
                 with torch.no_grad():

@@ -30,7 +30,7 @@ class SiamesePoseControlNet(nn.Module):
 
         self.goal_encoder = PoseEncoder(input_dim=goal_pose_dim, latent_dim=latent_dim)
         self.current_encoder.apply(self.current_encoder.init_weights)
-        
+
         self.control_head = nn.Sequential(
             nn.Linear(2 * latent_dim, 64),
             nn.LeakyReLU(),
@@ -52,19 +52,45 @@ class OnlineTrainer:
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-5)
         self.loss_fn = nn.MSELoss()
 
+    # def train(self, predicted_control, true_control):
+    #     if isinstance(predicted_control, list):
+    #         predicted_control = torch.tensor(predicted_control, dtype=torch.float32)
+    #     if isinstance(true_control, list):
+    #         true_control = torch.tensor(true_control, dtype=torch.float32)
+
+    #     # Compute loss (MSE between predicted control and true control)
+    #     loss = self.loss_fn(predicted_control, true_control)
+
+    #     # Backward pass and optimization
+    #     self.optimizer.zero_grad()
+    #     loss.backward()
+    #     self.optimizer.step()
+
+    #     return loss.item()
     def train(self, predicted_control, true_control):
+        # Ensure both inputs are torch tensors and of correct type
         if isinstance(predicted_control, list):
             predicted_control = torch.tensor(predicted_control, dtype=torch.float32)
         if isinstance(true_control, list):
             true_control = torch.tensor(true_control, dtype=torch.float32)
 
-        # Compute loss (MSE between predicted control and true control)
+        # Ensure inputs are 2D (batch_size, control_dim), if they are not already
+        if predicted_control.ndimension() == 1:  # If it's 1D (e.g., single sample)
+            predicted_control = predicted_control.unsqueeze(0)
+        if true_control.ndimension() == 1:  # If it's 1D (e.g., single sample)
+            true_control = true_control.unsqueeze(0)
+
+        # Make sure the dimensions of predicted and true control match
+        assert predicted_control.shape == true_control.shape, \
+            f"Shape mismatch: predicted {predicted_control.shape}, true {true_control.shape}"
+
+        # Compute MSE loss between the batch of predicted and true control commands
         loss = self.loss_fn(predicted_control, true_control)
 
-        # Backward pass and optimization
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+        # Perform the backward pass and optimize
+        self.optimizer.zero_grad()  # Reset gradients
+        loss.backward()  # Backpropagate gradients
+        self.optimizer.step()  # Perform an optimization step
 
         return loss.item()
     

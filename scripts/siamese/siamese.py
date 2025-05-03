@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
+
 
 class PoseEncoder(nn.Module):
     def __init__(self, input_dim, hidden_dim=64, latent_dim=32):
@@ -67,7 +69,7 @@ class OnlineTrainer:
     #     self.optimizer.step()
 
     #     return loss.item()
-    def train(self, predicted_control, true_control):
+    def train(self, predicted_control, true_control, error_pose):
         # Ensure both inputs are torch tensors and of correct type
         if isinstance(predicted_control, list):
             predicted_control = torch.tensor(predicted_control, dtype=torch.float32)
@@ -77,15 +79,23 @@ class OnlineTrainer:
         # Ensure inputs are 2D (batch_size, control_dim), if they are not already
         if predicted_control.ndimension() == 1:  # If it's 1D (e.g., single sample)
             predicted_control = predicted_control.unsqueeze(0)
+
         if true_control.ndimension() == 1:  # If it's 1D (e.g., single sample)
             true_control = true_control.unsqueeze(0)
+
+        if error_pose.ndimension() == 1:
+            error_pose = error_pose.unsqueeze(0)
 
         # Make sure the dimensions of predicted and true control match
         assert predicted_control.shape == true_control.shape, \
             f"Shape mismatch: predicted {predicted_control.shape}, true {true_control.shape}"
-
+        error_pose = np.array(error_pose)
         # Compute MSE loss between the batch of predicted and true control commands
-        loss = self.loss_fn(predicted_control, true_control)
+        min_val = np.min(error_pose, axis=0)  # shape (4,)
+        max_val = np.max(error_pose, axis=0)  # shape (4,)
+        scaled_error = (error_pose - min_val) / (max_val - min_val)
+        overall_mean = np.mean(scaled_error)               # total mean
+        loss = self.loss_fn(predicted_control, true_control) + 0.1*overall_mean
 
         # Perform the backward pass and optimize
         self.optimizer.zero_grad()  # Reset gradients

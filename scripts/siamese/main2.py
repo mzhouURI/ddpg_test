@@ -41,7 +41,7 @@ class DDPG_ROS(Node):
         self.thrust_cmd = [0,0]
         ##setting mode
         self.training = True
-
+        self.training_episode = 0
         self.buffer = deque(maxlen=10000)  # or any reasonable size
         self.batch_size = 32
 
@@ -74,8 +74,8 @@ class DDPG_ROS(Node):
             self.model.load_state_dict(torch.load("siamese_pose_control_net.pth"))
             self.model.eval()
 
-        self.timer_pub = self.create_timer(0.2, self.step)
-        self.timer_setpoint_update = self.create_timer(60, self.set_point_update)
+        self.timer_pub = self.create_timer(0.5, self.step)
+        self.timer_setpoint_update = self.create_timer(30, self.set_point_update)
         self.timer_setpoint_pub = self.create_timer(1.0, self.set_point_publish)
 
         self.set_controller = self.create_client(SetBool, '/mvp2_test_robot/controller/set')  
@@ -91,6 +91,21 @@ class DDPG_ROS(Node):
         return future.result()
     
     def set_point_update(self):
+        ##trigger training
+        if self.buffer:
+            thrust_batch = torch.stack([item[0] for item in self.buffer])
+            thrust_pred_batch = torch.stack([item[1] for item in self.buffer])
+            error_pose = torch.stack([item[2] for item in self.buffer])
+            loss = self.trainer.train(thrust_pred_batch, thrust_batch, error_pose)
+            print(f"training episode: {self.training_episode}")
+            print(f"Training loss: {loss}")
+            data = Float64()
+            data.data = float(loss)
+            self.loss_pub.publish(data)
+            self.buffer.clear()
+            self.training_episode = self.training_episode + 1
+            
+        #update setpoint
         self.set_point.position.z = random.uniform(-5,-1)
         self.set_point.orientation.z = random.uniform(-3.14, 3.14)
         self.set_point.velocity.x = random.uniform(0.0, 0.3)
@@ -148,32 +163,32 @@ class DDPG_ROS(Node):
 
     def step(self):
         try:
-
             current_pose = torch.tensor(self.state, dtype=torch.float32).unsqueeze(0)
             error_pose = torch.tensor(self.error_state, dtype=torch.float32).unsqueeze(0)
             thrust_cmd = torch.tensor(self.thrust_cmd[0], dtype=torch.float32).unsqueeze(0)
             # print(thrust_cmd)
             pred_thrust_cmd = self.model(current_pose, error_pose)
-            self.buffer.append((thrust_cmd, pred_thrust_cmd))
-            
-            if self.training: 
-                if len(self.buffer)>=self.batch_size:
-                    thrust_batch = torch.stack([item[0] for item in self.buffer])
-                    thrust_pred_batch = torch.stack([item[1] for item in self.buffer])
-                    loss = self.trainer.train(thrust_pred_batch, thrust_batch)
+            self.buffer.append((thrust_cmd, pred_thrust_cmd, error_pose))
 
-                    # pred_thrust_cmd = self.model(current_pose, error_pose)
-                    # print(pred_thrust_cmd.tolist())
-                    # print(self.thrust_cmd[0])
-                    # loss = self.trainer.train(pred_thrust_cmd, self.thrust_cmd[0])
-                    # loss = self.trainer.train(pred_thrust_cmd, thrust_cmd[0])
+            # if self.training: 
+            #     print(f"training episode: {self.training_episode}")
+                # if len(self.buffer)>=self.batch_size:
+                #     thrust_batch = torch.stack([item[0] for item in self.buffer])
+                #     thrust_pred_batch = torch.stack([item[1] for item in self.buffer])
+                #     loss = self.trainer.train(thrust_pred_batch, thrust_batch)
 
-                    print(f"Training loss: {loss}")
-                    data = Float64()
-                    data.data = float(loss)
-                    self.loss_pub.publish(data)
-                    self.buffer.clear()
-            else:
+                #     # pred_thrust_cmd = self.model(current_pose, error_pose)
+                #     # print(pred_thrust_cmd.tolist())
+                #     # print(self.thrust_cmd[0])
+                #     # loss = self.trainer.train(pred_thrust_cmd, self.thrust_cmd[0])
+                #     # loss = self.trainer.train(pred_thrust_cmd, thrust_cmd[0])
+
+                #     print(f"Training loss: {loss}")
+                #     data = Float64()
+                #     data.data = float(loss)
+                #     self.loss_pub.publish(data)
+                #     self.buffer.clear()
+            if not self.training:
             #inference
                 with torch.no_grad():
                     pred_thrust_cmd = self.model(current_pose, error_pose)

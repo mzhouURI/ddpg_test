@@ -39,7 +39,7 @@ class DDPG_ROS(Node):
 
         self.thrust_cmd = [0,0]
         ##setting mode
-        self.training = False
+        self.training = True
 
 
         state = {
@@ -68,11 +68,12 @@ class DDPG_ROS(Node):
         else:
             self.thruster_pub = self.create_publisher(Float64MultiArray, '/mvp2_test_robot/stonefish/thruster_command', 5)
 
-            self.model.load_state_dict(torch.load("siamese_05-03.pth"))
+            self.model.load_state_dict(torch.load("siamese_pose_control_net.pth"))
             self.model.eval()
 
         self.timer_pub = self.create_timer(0.2, self.step)
-        self.timer_setpoint_pub = self.create_timer(30, self.set_point_update)
+        self.timer_setpoint_update = self.create_timer(60, self.set_point_update)
+        self.timer_setpoint_pub = self.create_timer(1.0, self.set_point_publish)
 
         self.set_controller = self.create_client(SetBool, '/mvp2_test_robot/controller/set')  
         self.active_controller(True)
@@ -87,12 +88,15 @@ class DDPG_ROS(Node):
         return future.result()
     
     def set_point_update(self):
-        self.set_point.position.z = random.uniform(-5,-2)
+        self.set_point.position.z = random.uniform(-5,-1)
         self.set_point.orientation.z = random.uniform(-3.14, 3.14)
         self.set_point.velocity.x = random.uniform(-0.3, 0.3)
-        self.set_point_pub.publish(self.set_point)
+        # self.set_point_pub.publish(self.set_point)
         # print(f"desired depth = {self.set_point.position.z}")
     
+    def set_point_publish(self):
+        self.set_point_pub.publish(self.set_point)
+
     def wrap_to_pi(self, angle):
         """Wrap angle to [-pi, pi]."""
         return (angle + np.pi) % (2 * np.pi) - np.pi

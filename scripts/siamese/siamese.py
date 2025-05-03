@@ -16,11 +16,20 @@ class PoseEncoder(nn.Module):
         x = F.relu(self.fc2(x))
         return x
 
+    def init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            torch.manual_seed(42)  # Fix seed per layer for repeatability
+            nn.init.xavier_uniform_(m.weight)
+            nn.init.zeros_(m.bias)
+
 class SiamesePoseControlNet(nn.Module):
     def __init__(self, current_pose_dim=3, goal_pose_dim=2, latent_dim=32, thruster_num =4):
         super(SiamesePoseControlNet, self).__init__()
         self.current_encoder = PoseEncoder(input_dim=current_pose_dim, latent_dim=latent_dim)
+        self.current_encoder.apply(self.current_encoder.init_weights)
+
         self.goal_encoder = PoseEncoder(input_dim=goal_pose_dim, latent_dim=latent_dim)
+        self.current_encoder.apply(self.current_encoder.init_weights)
         
         self.control_head = nn.Sequential(
             nn.Linear(2 * latent_dim, 64),

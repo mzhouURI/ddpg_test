@@ -10,12 +10,16 @@ class PoseEncoder(nn.Module):
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         # self.bn1 = nn.LayerNorm(hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, latent_dim)
+        self.fc3 = nn.Linear(hidden_dim, latent_dim)
+
         
 
     def forward(self, pose):
         x = F.relu(self.fc1(pose))
         # x = self.bn1(x)
         x = F.relu(self.fc2(x))
+        x = F.relu(self.fc3(x))
+
         return x
 
     def init_weights(self, m):
@@ -34,9 +38,11 @@ class SiamesePoseControlNet(nn.Module):
         self.current_encoder.apply(self.current_encoder.init_weights)
 
         self.control_head = nn.Sequential(
-            nn.Linear(2 * latent_dim, 64),
-            nn.LeakyReLU(),
-            nn.Linear(64, thruster_num)  # Output: [v_linear, v_angular, etc.]
+            nn.Linear(2 * latent_dim, latent_dim),
+            nn.ReLU(),
+            nn.Linear(latent_dim, latent_dim),
+            nn.ReLU(),
+            nn.Linear(latent_dim, thruster_num)  # Output: [v_linear, v_angular, etc.]
             # nn.Tanh(),
         )
 
@@ -51,8 +57,8 @@ class SiamesePoseControlNet(nn.Module):
 class OnlineTrainer:
     def __init__(self, model):
         self.model = model
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-5)
-        self.loss_fn = nn.MSELoss()
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-4)
+        self.loss_fn = nn.MSELoss(reduction = 'sum')
 
     # def train(self, predicted_control, true_control):
     #     if isinstance(predicted_control, list):
@@ -90,16 +96,28 @@ class OnlineTrainer:
         assert predicted_control.shape == true_control.shape, \
             f"Shape mismatch: predicted {predicted_control.shape}, true {true_control.shape}"
         error_pose = np.array(error_pose)
+        state_loss = np.linalg.norm(error_pose)
+        print(state_loss)
         # Compute MSE loss between the batch of predicted and true control commands
-        min_val = np.min(error_pose, axis=0)  # shape (4,)
-        max_val = np.max(error_pose, axis=0)  # shape (4,)
-        scaled_error = (error_pose - min_val) / (max_val - min_val)
-        overall_mean = np.mean(scaled_error)               # total mean
-        loss = self.loss_fn(predicted_control, true_control) + 0.1*overall_mean
+        # min_val = np.min(error_pose, axis=0)  # shape (4,)
+        # max_val = np.max(error_pose, axis=0)  # shape (4,)
+        # scaled_error = (error_pose - min_val) / (max_val - min_val)
+        # overall_mean = np.mean(scaled_error)               # total mean
+        loss = self.loss_fn(predicted_control, true_control) + 0.0*state_loss # + 0.1*overall_mean
 
         # Perform the backward pass and optimize
         self.optimizer.zero_grad()  # Reset gradients
         loss.backward()  # Backpropagate gradients
+        # Compute the norm of gradients
+        total_norm = 0.0
+        for param in self.model.parameters():
+            if param.grad is not None:
+                # Compute the norm of each gradient tensor individually
+                grad_norm = torch.norm(param.grad, p=2)  # L2 norm of each gradient tensor
+                total_norm += grad_norm.item() ** 2  # Sum squared norms
+
+        total_norm = total_norm ** 0.5  # Take the square root to get the total norm
+        print(f"Gradient norm: {total_norm}")
         self.optimizer.step()  # Perform an optimization step
 
         return loss.item()

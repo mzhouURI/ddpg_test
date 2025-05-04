@@ -40,7 +40,7 @@ class DDPG_ROS(Node):
 
         self.thrust_cmd = [0,0]
         ##setting mode
-        self.training = True
+        self.training = False
         self.training_episode = 0
         self.buffer = deque(maxlen=10000)  # or any reasonable size
         self.batch_size = 32
@@ -91,19 +91,20 @@ class DDPG_ROS(Node):
         return future.result()
     
     def set_point_update(self):
-        ##trigger training
-        if self.buffer:
-            thrust_batch = torch.stack([item[0] for item in self.buffer])
-            thrust_pred_batch = torch.stack([item[1] for item in self.buffer])
-            error_pose = torch.stack([item[2] for item in self.buffer])
-            loss = self.trainer.train(thrust_pred_batch, thrust_batch, error_pose)
-            print(f"training episode: {self.training_episode}")
-            print(f"Training loss: {loss}")
-            data = Float64()
-            data.data = float(loss)
-            self.loss_pub.publish(data)
-            self.buffer.clear()
-            self.training_episode = self.training_episode + 1
+        # ##trigger training
+        # if self.training:
+        #     if self.buffer:
+        #         thrust_batch = torch.stack([item[0] for item in self.buffer])
+        #         thrust_pred_batch = torch.stack([item[1] for item in self.buffer])
+        #         error_pose = torch.stack([item[2] for item in self.buffer])
+        #         loss = self.trainer.train(thrust_pred_batch, thrust_batch, error_pose)
+        #         print(f"training episode: {self.training_episode}")
+        #         print(f"Training loss: {loss}")
+        #         data = Float64()
+        #         data.data = float(loss)
+        #         self.loss_pub.publish(data)
+        #         self.buffer.clear()
+        #         self.training_episode = self.training_episode + 1
             
         #update setpoint
         self.set_point.position.z = random.uniform(-5,-1)
@@ -170,24 +171,19 @@ class DDPG_ROS(Node):
             pred_thrust_cmd = self.model(current_pose, error_pose)
             self.buffer.append((thrust_cmd, pred_thrust_cmd, error_pose))
 
-            # if self.training: 
-            #     print(f"training episode: {self.training_episode}")
-                # if len(self.buffer)>=self.batch_size:
-                #     thrust_batch = torch.stack([item[0] for item in self.buffer])
-                #     thrust_pred_batch = torch.stack([item[1] for item in self.buffer])
-                #     loss = self.trainer.train(thrust_pred_batch, thrust_batch)
+            if self.training: 
 
-                #     # pred_thrust_cmd = self.model(current_pose, error_pose)
-                #     # print(pred_thrust_cmd.tolist())
-                #     # print(self.thrust_cmd[0])
-                #     # loss = self.trainer.train(pred_thrust_cmd, self.thrust_cmd[0])
-                #     # loss = self.trainer.train(pred_thrust_cmd, thrust_cmd[0])
+                    pred_thrust_cmd = self.model(current_pose, error_pose)
+                    print(pred_thrust_cmd.tolist())
+                    print(self.thrust_cmd[0])
+                    # loss = self.trainer.train(pred_thrust_cmd, self.thrust_cmd[0], error_pose)
+                    loss = self.trainer.train(pred_thrust_cmd, thrust_cmd[0], error_pose)
 
-                #     print(f"Training loss: {loss}")
-                #     data = Float64()
-                #     data.data = float(loss)
-                #     self.loss_pub.publish(data)
-                #     self.buffer.clear()
+                    print(f"Training loss: {loss}")
+                    data = Float64()
+                    data.data = float(loss)
+                    self.loss_pub.publish(data)
+                    self.buffer.clear()
             if not self.training:
             #inference
                 with torch.no_grad():

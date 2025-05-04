@@ -145,7 +145,7 @@ class TD3_ROS(Node):
     # def save_model(self):
 
     def step(self):
-        # try:
+        try:
             #new pose and error pose
             new_state = torch.tensor(self.state, dtype=torch.float32).unsqueeze(0)
             new_error_state = torch.tensor(self.error_state, dtype=torch.float32).unsqueeze(0)
@@ -157,7 +157,7 @@ class TD3_ROS(Node):
 
                         
             #error state reward
-            reward = self.calculate_reward(self.prev_error_state, new_state)
+            reward = self.calculate_reward(self.prev_error_state, new_error_state)
             
             done = False
             if self.set_point_update_flag:
@@ -167,8 +167,8 @@ class TD3_ROS(Node):
                 self.model.replay_buffer.add(self.prev_state, self.prev_error_state, self.prev_action.detach().cpu().numpy(), 
                                              reward, new_state, new_error_state, done)
             
-            print(new_state - self.prev_state)
-            print(new_error_state - self.prev_error_state)
+            # print(new_state - self.prev_state)
+            # print(new_error_state - self.prev_error_state)
             ##update the prev error and action
             self.prev_error_state = new_error_state
             self.prev_state = new_state
@@ -181,8 +181,8 @@ class TD3_ROS(Node):
                 msg.data = [float(c1_loss), float(c2_loss), float(actor_loss)]
                 self.loss_pub.publish(msg)
             self.total_reward  = self.total_reward + reward
-        # except Exception as e:
-        #     self.get_logger().error(f"Error in step(): {e}")
+        except Exception as e:
+            self.get_logger().error(f"Error in step(): {e}")
 
     def calculate_reward(self, error_pose, new_error_pose):
         new_error = new_error_pose.view(-1, 1)
@@ -204,18 +204,18 @@ class TD3_ROS(Node):
 
 
         # #error reduction reward
-        # W = torch.tensor([1, 1, 1, 1])
-        # error_sum = torch.sum(W * current_error).item()
-        # new_error_sum = torch.sum(W * new_error).item()
+        W = torch.tensor([1, 1, 1, 1])
+        error_sum = torch.sum(W * current_error).item()
+        new_error_sum = torch.sum(W * new_error).item()
 
         # # Reward is reduction in weighted error
-        # error_reduction_reward = (error_sum - new_error_sum)
+        error_reduction_reward = (error_sum - new_error_sum)
         # print(current_error)
         # print(new_error)
         # print(current_error - new_error)
-
+        
         # Combine both: negative reward means we want to minimize both
-        reward = -error_reward #+ error_reduction_reward  # scale smoothness with a factor
+        reward = -error_reward + error_reduction_reward  # scale smoothness with a factor
         return reward
 
 

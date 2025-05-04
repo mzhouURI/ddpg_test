@@ -31,7 +31,7 @@ class TD3Agent:
             print(f"Loaded actor weights from {actor_ckpt}")
 
         self.actor_target = copy.deepcopy(self.actor)
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=1e-3)
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=1e-7)
 
         # Initialize critic networks and target critics
         self.critic1 = Critic(state_dim, error_state_dim, action_dim).to(device)
@@ -40,7 +40,7 @@ class TD3Agent:
         self.critic2_target = copy.deepcopy(self.critic2)
 
         self.critic_optimizer = torch.optim.Adam(
-            list(self.critic1.parameters()) + list(self.critic2.parameters()), lr=1e-3)
+            list(self.critic1.parameters()) + list(self.critic2.parameters()), lr=1e-7)
 
         # Set max action for normalizing outputs
         self.max_action = max_action
@@ -112,10 +112,10 @@ class TD3Agent:
         self.critic_optimizer.step()
 
         # Update the actor every few steps
+        actor_loss = 0
         if torch.randint(0, 2, (1,)).item() == 0:
             # Get the action from the actor
             actor_loss = -self.critic1(state, error_state, self.actor(state, error_state)).mean()
-
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
             self.actor_optimizer.step()
@@ -129,3 +129,9 @@ class TD3Agent:
 
             for target_param, param in zip(self.critic2_target.parameters(), self.critic2.parameters()):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
+
+        return critic1_loss, critic2_loss, actor_loss
+    
+
+    def save_model(self):
+        torch.save(self.model.state_dict(), "TD3_model.pth")

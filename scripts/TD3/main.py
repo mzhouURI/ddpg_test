@@ -24,7 +24,8 @@ class TD3_ROS(Node):
 
         self.set_point_pub = self.create_publisher(ControlProcess, '/mvp2_test_robot/controller/process/set_point', 3)
         
-        self.loss_pub = self.create_publisher(Float64, '/training/loss',10)
+        self.loss_pub = self.create_publisher(Float64MultiArray, '/training/loss',10)
+
                  #initial set point
         self.set_point = ControlProcess()
         self.set_point.orientation.x = 0.0
@@ -43,7 +44,7 @@ class TD3_ROS(Node):
         self.training = True
         self.training_episode = 0
         self.buffer = deque(maxlen=10000)  # or any reasonable size
-        self.batch_size = 64
+        self.batch_size = 10
 
         state = {
             'z': (0),
@@ -67,7 +68,7 @@ class TD3_ROS(Node):
             
         self.thruster_pub = self.create_publisher(Float64MultiArray, '/mvp2_test_robot/stonefish/thruster_command', 5)
 
-        self.timer_setpoint_update = self.create_timer(30, self.set_point_update)
+        self.timer_setpoint_update = self.create_timer(60, self.set_point_update)
         self.timer_setpoint_pub = self.create_timer(1.0, self.set_point_publish)
         self.timer_pub = self.create_timer(0.5, self.step)
 
@@ -133,7 +134,7 @@ class TD3_ROS(Node):
         self.error_state = self.flatten_state(state_error)
 
     def save_model(self):
-        self.trainer.save_model()
+        self.model.save_model()
 
     def step(self):
         # try:
@@ -143,7 +144,7 @@ class TD3_ROS(Node):
             msg = Float64MultiArray()
             msg.data = action.detach().cpu().numpy().flatten().tolist()                   
             self.thruster_pub.publish(msg)
-            time.sleep(0.1)
+            time.sleep(0.2)
 
             new_pose = torch.tensor(self.state, dtype=torch.float32).unsqueeze(0)
             new_error_pose = torch.tensor(self.error_state, dtype=torch.float32).unsqueeze(0)
@@ -157,7 +158,10 @@ class TD3_ROS(Node):
             done = False
             self.model.replay_buffer.add(current_pose, error_pose, action.detach().cpu().numpy(), reward, new_pose, new_error_pose, done)
             if len(self.model.replay_buffer.buffer) > self.batch_size:  # Start training after enough experiences
-                self.model.train(batch_size=self.batch_size)
+                c1_loss, c2_loss, actor_loss = self.model.train(batch_size=self.batch_size)
+                msg = Float64MultiArray()
+                msg.data = [float(c1_loss), float(c2_loss), float(actor_loss)]
+                self.loss_pub.publish(msg)
             self.total_reward  = self.total_reward + reward
         # except Exception as e:
         #     self.get_logger().error(f"Error in step(): {e}")

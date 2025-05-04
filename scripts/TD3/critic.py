@@ -1,18 +1,28 @@
-import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import torch
 
 class Critic(nn.Module):
     def __init__(self, state_dim, error_dim, action_dim):
         super().__init__()
-        self.q_net = nn.Sequential(
-            nn.Linear(state_dim + error_dim + action_dim, 128),
-            nn.ReLU(),
-            nn.Linear(128, 128),
-            nn.ReLU(),
-            nn.Linear(128, 1)
-        )
+        input_dim = state_dim + error_dim + action_dim
+
+        self.linear1 = nn.Linear(input_dim, 128)
+        self.ln1 = nn.LayerNorm(128)
+        self.linear2 = nn.Linear(128, 128)
+        self.ln2 = nn.LayerNorm(128)
+        self.output_layer = nn.Linear(128, 1)
 
     def forward(self, state, goal, action):
         x = torch.cat([state, goal, action], dim=1)
-        return self.q_net(x)
+        x = self.linear1(x)
+        x = self.ln1(x)
+        x = torch.relu(x)
+        x = self.linear2(x)
+        x = self.ln2(x)
+        x = torch.relu(x)
+        return self.output_layer(x)
+
+    def init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            torch.nn.init.xavier_uniform_(m.weight)
+            torch.nn.init.zeros_(m.bias)

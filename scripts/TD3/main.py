@@ -59,7 +59,7 @@ class TD3_ROS(Node):
         }
         self.state = self.flatten_state(state)
         self.error_state = self.flatten_state(error_state)
-
+        self.prev_action = torch.zeros(4)
         device = torch.device("cpu")
         self.model = TD3Agent(len(self.state), len(self.error_state), 4, 1, device=device, 
                               actor_ckpt='05-03-siamese.pth',
@@ -155,11 +155,10 @@ class TD3_ROS(Node):
             new_error_pose = torch.tensor(self.error_state, dtype=torch.float32).unsqueeze(0)
             
             #error state reward
-            error_magnitude = torch.norm(new_error_pose)
-
-            # Reward is negative distance (minimizing the error is encouraged)
-            reward = -error_magnitude.item()  # Convert tensor to scalar value
+            reward = self.calculate_reward(new_error_pose, action, self.prev_action)
             
+            self.prev_action = action
+
             done = False
             self.model.replay_buffer.add(current_pose, error_pose, action.detach().cpu().numpy(), reward, new_pose, new_error_pose, done)
             if len(self.model.replay_buffer.buffer) > self.batch_size:  # Start training after enough experiences
@@ -170,6 +169,27 @@ class TD3_ROS(Node):
             self.total_reward  = self.total_reward + reward
         # except Exception as e:
         #     self.get_logger().error(f"Error in step(): {e}")
+
+    def calculate_reward(self, new_error_pose, action, prev_action):
+        error = new_error_pose.view(-1, 1)
+
+        # Define a weight matrix W: shape [3, 3]
+        w_z = 3.0
+        w_pitch = 1.0
+        w_yaw = 1.0
+        w_u = 2.0
+        # Create diagonal weight matrix W
+        W = torch.diag(torch.tensor([w_z, w_pitch, w_yaw, w_u]))
+        # Compute quadratic form: error^T * W * error -> scalar tensor
+        error_reward = torch.matmul(error.T, torch.matmul(W, error)).item()  # shape [1, 1]
+        smoothness_penalty = torch.norm(action - prev_action).item()
+
+        # Combine both: negative reward means we want to minimize both
+        reward = -error_reward - 0.1 * smoothness_penalty  # scale smoothness with a factor
+        return reward
+
+
+
 
 def main(args=None):
 

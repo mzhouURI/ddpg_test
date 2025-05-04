@@ -25,22 +25,25 @@ class TD3Agent:
     def __init__(self, state_dim, error_state_dim, action_dim, max_action, device='cpu', actor_ckpt=None, actor_lr = 1e-4, critic_lr = 1e-4):
         # Initialize actor (SiamesePoseControlNet) and critics (Critic)
         self.actor = SiamesePoseControlNet(current_pose_dim = state_dim, goal_pose_dim =  error_state_dim, latent_dim = 64, thruster_num=action_dim)
-
+        
         if actor_ckpt is not None:
             self.actor.load_state_dict(torch.load(actor_ckpt, map_location=device))
             print(f"Loaded actor weights from {actor_ckpt}")
 
         self.actor_target = copy.deepcopy(self.actor)
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr, amsgrad = True)
 
         # Initialize critic networks and target critics
         self.critic1 = Critic(state_dim, error_state_dim, action_dim).to(device)
+        self.critic1.apply(self.critic1.init_weights)
         self.critic2 = Critic(state_dim, error_state_dim, action_dim).to(device)
+        self.critic2.apply(self.critic2.init_weights)
+
         self.critic1_target = copy.deepcopy(self.critic1)
         self.critic2_target = copy.deepcopy(self.critic2)
 
         self.critic_optimizer = torch.optim.Adam(
-            list(self.critic1.parameters()) + list(self.critic2.parameters()), lr=critic_lr)
+            list(self.critic1.parameters()) + list(self.critic2.parameters()), lr=critic_lr,  amsgrad = True)
 
         # Set max action for normalizing outputs
         self.max_action = max_action

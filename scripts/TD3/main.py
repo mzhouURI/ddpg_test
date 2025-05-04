@@ -43,7 +43,7 @@ class TD3_ROS(Node):
         self.training = True
         self.training_episode = 0
         self.buffer = deque(maxlen=10000)  # or any reasonable size
-        self.batch_size = 32
+        self.batch_size = 64
 
         state = {
             'z': (0),
@@ -156,8 +156,8 @@ class TD3_ROS(Node):
             
             done = False
             self.model.replay_buffer.add(current_pose, error_pose, action.detach().cpu().numpy(), reward, new_pose, new_error_pose, done)
-            if len(self.model.replay_buffer.buffer) > 64:  # Start training after enough experiences
-                self.model.train(batch_size=64)
+            if len(self.model.replay_buffer.buffer) > self.batch_size:  # Start training after enough experiences
+                self.model.train(batch_size=self.batch_size)
             self.total_reward  = self.total_reward + reward
         # except Exception as e:
         #     self.get_logger().error(f"Error in step(): {e}")

@@ -84,28 +84,24 @@ class TD3Agent:
 
         # Compute target Q-values using the target critics
         with torch.no_grad():
-            # next_action = self.actor_target(next_state, next_error_state)
-            # Ensure both tensors have the correct shape
-            next_state = next_state.view(-1, next_state.size(-1))  # Flatten the batch dimension, keeping the feature dimension
-            next_error_state = next_error_state.view(-1, next_error_state.size(-1))  # Similarly for the error_state
-
-            # Then pass them to the actor target
+            next_state = next_state.squeeze(1)  # Now shape is [64, 10]
+            next_error_state = next_error_state.squeeze(1)  # Now shape is [64, 4]
             next_action = self.actor_target(next_state, next_error_state)
-
             target_q1 = self.critic1_target(next_state, next_error_state, next_action)
             target_q2 = self.critic2_target(next_state, next_error_state, next_action)
+            target_q1 = target_q1.squeeze(1)  # [64]
+            target_q2 = target_q2.squeeze(1)  # [64]
             target_q = reward + (1 - done) * gamma * torch.min(target_q1, target_q2)
+            target_q = target_q.unsqueeze(1)
 
         # Update the critics
         
-        state = state.view(state.size(0), -1)  # Flatten all dimensions except the batch size
-        error_state = error_state.view(error_state.size(0), -1)
-        action = action.view(action.size(0), -1)
-
+        state = state.squeeze(1)
+        error_state = error_state.squeeze(1)
+        action = action.squeeze(1)
 
         q1 = self.critic1(state, error_state, action)
         q2 = self.critic2(state, error_state, action)
-
         critic1_loss = F.mse_loss(q1, target_q)
         critic2_loss = F.mse_loss(q2, target_q)
 

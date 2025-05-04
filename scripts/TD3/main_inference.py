@@ -1,6 +1,6 @@
 import time
 import numpy as np
-from agent import TD3Agent
+from siamese import SiamesePoseControlNet, OnlineTrainer
 import rclpy
 from rclpy.node import Node
 from mvp_msgs.msg import ControlProcess
@@ -12,7 +12,7 @@ from std_msgs.msg import Float64, Float64MultiArray
 import torch
 from collections import deque
 
-class TD3_ROS(Node):
+class DDPG_ROS(Node):
     def __init__(self):
         super().__init__('ddpg_node')
         self.set_point_interval = 100
@@ -24,8 +24,7 @@ class TD3_ROS(Node):
 
         self.set_point_pub = self.create_publisher(ControlProcess, '/mvp2_test_robot/controller/process/set_point', 3)
         
-        self.loss_pub = self.create_publisher(Float64MultiArray, '/training/loss',10)
-
+        self.loss_pub = self.create_publisher(Float64, '/training/loss',10)
                  #initial set point
         self.set_point = ControlProcess()
         self.set_point.orientation.x = 0.0
@@ -41,10 +40,7 @@ class TD3_ROS(Node):
 
         self.thrust_cmd = [0,0]
         ##setting mode
-        self.training = True
-        self.training_episode = 0
-        self.buffer = deque(maxlen=10000)  # or any reasonable size
-        self.batch_size =64
+        self.batch_size = 32
 
         state = {
             'z': (0),
@@ -60,22 +56,23 @@ class TD3_ROS(Node):
         self.state = self.flatten_state(state)
         self.error_state = self.flatten_state(error_state)
 
-        device = torch.device("cpu")
-        self.model = TD3Agent(len(self.state), len(self.error_state), 4, 1, device=device, 
-                              actor_ckpt='05-03-siamese.pth',
-                              actor_lr = 1e-6, critic_lr= 1e-7)
-        self.total_reward = 0
+        
+        self.model = SiamesePoseControlNet(current_pose_dim = len(self.state), goal_pose_dim = len(self.error_state), latent_dim = 64)
 
-        # self.timer_model_save = self.create_timer(100, self.save_model)
-            
+    
         self.thruster_pub = self.create_publisher(Float64MultiArray, '/mvp2_test_robot/stonefish/thruster_command', 5)
 
+        self.model.load_state_dict(torch.load("model/actor.pth"))
+        self.model.eval()
+
+        self.timer_pub = self.create_timer(0.5, self.step)
         self.timer_setpoint_update = self.create_timer(60, self.set_point_update)
         self.timer_setpoint_pub = self.create_timer(1.0, self.set_point_publish)
-        self.timer_pub = self.create_timer(0.5, self.step)
 
         self.set_controller = self.create_client(SetBool, '/mvp2_test_robot/controller/set')  
         self.active_controller(True)
+        
+
         
     def active_controller(self, req: bool):
         set_controller = SetBool.Request()
@@ -85,14 +82,12 @@ class TD3_ROS(Node):
         return future.result()
     
     def set_point_update(self):
-        print(f"episode reward = {self.total_reward}")
-        self.model.save_model()
-
         #update setpoint
         self.set_point.position.z = random.uniform(-5,-1)
         self.set_point.orientation.z = random.uniform(-3.14, 3.14)
         self.set_point.velocity.x = random.uniform(0.0, 0.3)
-        self.total_reward = 0
+        # self.set_point_pub.publish(self.set_point)
+        # print(f"desired depth = {self.set_point.position.z}")
     
     def set_point_publish(self):
         self.set_point_pub.publish(self.set_point)
@@ -137,42 +132,29 @@ class TD3_ROS(Node):
         }
         self.error_state = self.flatten_state(state_error)
 
-    # def save_model(self):
+    def thruster_callback(self, msg):
+        self.thrust_cmd[0] = list(msg.data)
 
     def step(self):
-        # try:
+        try:
             current_pose = torch.tensor(self.state, dtype=torch.float32).unsqueeze(0)
             error_pose = torch.tensor(self.error_state, dtype=torch.float32).unsqueeze(0)
-            action = self.model.select_action(current_pose, error_pose)
-            msg = Float64MultiArray()
-            msg.data = action.detach().cpu().numpy().flatten().tolist()                   
-            self.thruster_pub.publish(msg)
-            time.sleep(0.2)
+            pred_thrust_cmd = self.model(current_pose, error_pose)
 
-            new_pose = torch.tensor(self.state, dtype=torch.float32).unsqueeze(0)
-            new_error_pose = torch.tensor(self.error_state, dtype=torch.float32).unsqueeze(0)
-            
-            #error state reward
-            error_magnitude = torch.norm(new_error_pose)
-
-            # Reward is negative distance (minimizing the error is encouraged)
-            reward = -error_magnitude.item()  # Convert tensor to scalar value
-            
-            done = False
-            self.model.replay_buffer.add(current_pose, error_pose, action.detach().cpu().numpy(), reward, new_pose, new_error_pose, done)
-            if len(self.model.replay_buffer.buffer) > self.batch_size:  # Start training after enough experiences
-                c1_loss, c2_loss, actor_loss = self.model.train(batch_size=self.batch_size)
+            with torch.no_grad():
+                pred_thrust_cmd = self.model(current_pose, error_pose)
+                print(pred_thrust_cmd)
                 msg = Float64MultiArray()
-                msg.data = [float(c1_loss), float(c2_loss), float(actor_loss)]
-                self.loss_pub.publish(msg)
-            self.total_reward  = self.total_reward + reward
-        # except Exception as e:
-        #     self.get_logger().error(f"Error in step(): {e}")
+                msg.data = pred_thrust_cmd.detach().cpu().numpy().flatten().tolist()                   
+                self.thruster_pub.publish(msg)
+
+        except Exception as e:
+            self.get_logger().error(f"Error in step(): {e}")
 
 def main(args=None):
 
     rclpy.init(args=args)
-    node = TD3_ROS()
+    node = DDPG_ROS()
     node.set_point_update()
 
     try:

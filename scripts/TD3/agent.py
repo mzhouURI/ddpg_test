@@ -22,7 +22,7 @@ class ReplayBuffer:
         return map(torch.FloatTensor, (s, g, a, r, s2, g2, d))
 
 class TD3Agent:
-    def __init__(self, state_dim, error_state_dim, action_dim, max_action, device='cpu', actor_ckpt=None):
+    def __init__(self, state_dim, error_state_dim, action_dim, max_action, device='cpu', actor_ckpt=None, actor_lr = 1e-4, critic_lr = 1e-4):
         # Initialize actor (SiamesePoseControlNet) and critics (Critic)
         self.actor = SiamesePoseControlNet(current_pose_dim = state_dim, goal_pose_dim =  error_state_dim, latent_dim = 64, thruster_num=action_dim)
 
@@ -31,7 +31,7 @@ class TD3Agent:
             print(f"Loaded actor weights from {actor_ckpt}")
 
         self.actor_target = copy.deepcopy(self.actor)
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=1e-7)
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
 
         # Initialize critic networks and target critics
         self.critic1 = Critic(state_dim, error_state_dim, action_dim).to(device)
@@ -40,7 +40,7 @@ class TD3Agent:
         self.critic2_target = copy.deepcopy(self.critic2)
 
         self.critic_optimizer = torch.optim.Adam(
-            list(self.critic1.parameters()) + list(self.critic2.parameters()), lr=1e-7)
+            list(self.critic1.parameters()) + list(self.critic2.parameters()), lr=critic_lr)
 
         # Set max action for normalizing outputs
         self.max_action = max_action
@@ -133,5 +133,19 @@ class TD3Agent:
         return critic1_loss, critic2_loss, actor_loss
     
 
-    def save_model(self):
-        torch.save(self.model.state_dict(), "TD3_model.pth")
+    
+    def save_model(self, save_dir="", actor_filename="actor.pth", critic1_filename="critic1.pth", critic2_filename="critic2.pth"):
+        """
+        Save the actor and critic models to disk.
+        """
+        # Save the actor model
+        torch.save(self.actor.state_dict(), "model/actor.pth")
+
+        # Save the critic models
+        torch.save(self.critic1.state_dict(), "model/critic1.pth")
+        torch.save(self.critic2.state_dict(), "model/critic2.pth")
+
+        # Optionally, save the target models as well
+        torch.save(self.actor_target.state_dict(), "model/actor_target.pth")
+        torch.save(self.critic1_target.state_dict(), "model/critic1_target.pth")
+        torch.save(self.critic2_target.state_dict(), "model/critic2_target.pth")

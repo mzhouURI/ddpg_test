@@ -25,7 +25,7 @@ class TD3_ROS(Node):
         self.set_point_pub = self.create_publisher(ControlProcess, '/mvp2_test_robot/controller/process/set_point', 3)
         
         self.loss_pub = self.create_publisher(Float64MultiArray, '/training/loss',10)
-
+        self.total_reward_pub = self.create_publisher(Float64, '/training/episode_reward', 10)
                  #initial set point
         self.set_point = ControlProcess()
         self.set_point.orientation.x = 0.0
@@ -87,7 +87,9 @@ class TD3_ROS(Node):
     def set_point_update(self):
         print(f"episode reward = {self.total_reward}")
         self.model.save_model()
-
+        msg = Float64()
+        msg.data = float (self.total_reward)
+        self.total_reward_pub.publish(msg)
         #update setpoint
         self.set_point.position.z = random.uniform(-5,-1)
         self.set_point.orientation.z = random.uniform(-3.14, 3.14)
@@ -143,7 +145,7 @@ class TD3_ROS(Node):
         # try:
             current_pose = torch.tensor(self.state, dtype=torch.float32).unsqueeze(0)
             error_pose = torch.tensor(self.error_state, dtype=torch.float32).unsqueeze(0)
-            action = self.model.select_action(current_pose, error_pose)
+            action = self.model.select_action(current_pose, error_pose, noise_std= 0.1)
             msg = Float64MultiArray()
             msg.data = action.detach().cpu().numpy().flatten().tolist()                   
             self.thruster_pub.publish(msg)

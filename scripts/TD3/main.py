@@ -43,9 +43,9 @@ class TD3_ROS(Node):
         ##setting mode
         self.training = True
         self.training_episode = 0
-        self.buffer = deque(maxlen=10000)  # or any reasonable size
         self.batch_size =64
-
+        self.batch_warmup_size =self.batch_size*1
+        self.set_point_update_flag = False
         state = {
             'z': (0),
             'euler': (0,0,0), # Quaternion (x, y, z, w)
@@ -60,10 +60,12 @@ class TD3_ROS(Node):
         self.state = self.flatten_state(state)
         self.error_state = self.flatten_state(error_state)
         self.prev_action = torch.zeros(4)
+        self.prev_error_state = torch.zeros(len(self.error_state))
+        self.prev_state = torch.zeros(len(self.state))
         device = torch.device("cpu")
         self.model = TD3Agent(len(self.state), len(self.error_state), 4, 1, device=device, 
                               actor_ckpt='05-03-siamese.pth',
-                              actor_lr = 1e-6, critic_lr= 1e-7)
+                              actor_lr = 1e-7, critic_lr= 1e-7)
         self.total_reward = 0
 
         # self.timer_model_save = self.create_timer(100, self.save_model)
@@ -93,8 +95,9 @@ class TD3_ROS(Node):
         #update setpoint
         self.set_point.position.z = random.uniform(-5,-1)
         self.set_point.orientation.z = random.uniform(-3.14, 3.14)
-        self.set_point.velocity.x = random.uniform(0.0, 0.3)
+        self.set_point.velocity.x = random.uniform(0.0, 0.5)
         self.total_reward = 0
+        self.set_point_update_flag = True
     
     def set_point_publish(self):
         self.set_point_pub.publish(self.set_point)
@@ -143,26 +146,37 @@ class TD3_ROS(Node):
 
     def step(self):
         # try:
-            current_pose = torch.tensor(self.state, dtype=torch.float32).unsqueeze(0)
-            error_pose = torch.tensor(self.error_state, dtype=torch.float32).unsqueeze(0)
-            action = self.model.select_action(current_pose, error_pose, noise_std= 0.1)
+            #new pose and error pose
+            new_state = torch.tensor(self.state, dtype=torch.float32).unsqueeze(0)
+            new_error_state = torch.tensor(self.error_state, dtype=torch.float32).unsqueeze(0)
+            #action for the next round
+            action = self.model.select_action(new_state, new_error_state, noise_std= 0.05)
             msg = Float64MultiArray()
             msg.data = action.detach().cpu().numpy().flatten().tolist()                   
             self.thruster_pub.publish(msg)
-            time.sleep(0.2)
 
-            new_pose = torch.tensor(self.state, dtype=torch.float32).unsqueeze(0)
-            new_error_pose = torch.tensor(self.error_state, dtype=torch.float32).unsqueeze(0)
-            
+                        
             #error state reward
-            reward = self.calculate_reward(new_error_pose, action, self.prev_action)
+            reward = self.calculate_reward(self.prev_error_state, new_state)
             
+            done = False
+            if self.set_point_update_flag:
+                self.set_point_update_flag = False
+                print("skip this step")
+            else:
+                self.model.replay_buffer.add(self.prev_state, self.prev_error_state, self.prev_action.detach().cpu().numpy(), 
+                                             reward, new_state, new_error_state, done)
+            
+            print(new_state - self.prev_state)
+            print(new_error_state - self.prev_error_state)
+            ##update the prev error and action
+            self.prev_error_state = new_error_state
+            self.prev_state = new_state
             self.prev_action = action
 
-            done = False
-            self.model.replay_buffer.add(current_pose, error_pose, action.detach().cpu().numpy(), reward, new_pose, new_error_pose, done)
-            if len(self.model.replay_buffer.buffer) > self.batch_size:  # Start training after enough experiences
-                c1_loss, c2_loss, actor_loss = self.model.train(batch_size=self.batch_size)
+            
+            if len(self.model.replay_buffer.buffer) > self.batch_warmup_size:  # Start training after enough experiences
+                c1_loss, c2_loss, actor_loss = self.model.train(batch_size=self.batch_size, gamma = 0.99)
                 msg = Float64MultiArray()
                 msg.data = [float(c1_loss), float(c2_loss), float(actor_loss)]
                 self.loss_pub.publish(msg)
@@ -170,22 +184,38 @@ class TD3_ROS(Node):
         # except Exception as e:
         #     self.get_logger().error(f"Error in step(): {e}")
 
-    def calculate_reward(self, new_error_pose, action, prev_action):
-        error = new_error_pose.view(-1, 1)
+    def calculate_reward(self, error_pose, new_error_pose):
+        new_error = new_error_pose.view(-1, 1)
+        current_error = error_pose.view(-1,1)
 
         # Define a weight matrix W: shape [3, 3]
         w_z = 3.0
         w_pitch = 1.0
         w_yaw = 1.0
-        w_u = 2.0
+        w_u = 5.0
         # Create diagonal weight matrix W
-        W = torch.diag(torch.tensor([w_z, w_pitch, w_yaw, w_u]))
+        # W = torch.diag(torch.tensor([w_z, w_pitch, w_yaw, w_u]))
         # Compute quadratic form: error^T * W * error -> scalar tensor
-        error_reward = torch.matmul(error.T, torch.matmul(W, error)).item()  # shape [1, 1]
-        smoothness_penalty = torch.norm(action - prev_action).item()
+        # error_reward = torch.matmul(error.T, torch.matmul(W, error)).item()  # shape [1, 1]
+
+        W = torch.tensor([w_z, w_pitch, w_yaw, w_u])
+        abs_error = torch.abs(new_error)
+        error_reward = torch.sum(W * abs_error).item()
+
+
+        # #error reduction reward
+        # W = torch.tensor([1, 1, 1, 1])
+        # error_sum = torch.sum(W * current_error).item()
+        # new_error_sum = torch.sum(W * new_error).item()
+
+        # # Reward is reduction in weighted error
+        # error_reduction_reward = (error_sum - new_error_sum)
+        # print(current_error)
+        # print(new_error)
+        # print(current_error - new_error)
 
         # Combine both: negative reward means we want to minimize both
-        reward = -error_reward - 0.1 * smoothness_penalty  # scale smoothness with a factor
+        reward = -error_reward #+ error_reduction_reward  # scale smoothness with a factor
         return reward
 
 

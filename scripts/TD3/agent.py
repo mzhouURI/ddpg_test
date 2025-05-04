@@ -31,7 +31,7 @@ class TD3Agent:
             print(f"Loaded actor weights from {actor_ckpt}")
 
         self.actor_target = copy.deepcopy(self.actor)
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr, amsgrad = True)
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr, amsgrad = True, weight_decay=1e-4)
 
         # Initialize critic networks and target critics
         self.critic1 = Critic(state_dim, error_state_dim, action_dim).to(device)
@@ -43,7 +43,7 @@ class TD3Agent:
         self.critic2_target = copy.deepcopy(self.critic2)
 
         self.critic_optimizer = torch.optim.Adam(
-            list(self.critic1.parameters()) + list(self.critic2.parameters()), lr=critic_lr,  amsgrad = True)
+            list(self.critic1.parameters()) + list(self.critic2.parameters()), lr=critic_lr,  amsgrad = True, weight_decay=1e-4)
 
         # Set max action for normalizing outputs
         self.max_action = max_action

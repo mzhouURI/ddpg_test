@@ -43,7 +43,7 @@ class TD3_ROS(Node):
         ##setting mode
         self.training = True
         self.training_episode = 0
-        self.batch_size =64
+        self.batch_size = 128
         self.batch_warmup_size =self.batch_size*1
         self.set_point_update_flag = False
         state = {
@@ -65,7 +65,9 @@ class TD3_ROS(Node):
         device = torch.device("cpu")
         self.model = TD3Agent(len(self.state), len(self.error_state), 4, 1, device=device, 
                               actor_ckpt='05-03-siamese.pth',
-                              actor_lr = 1e-7, critic_lr= 1e-7)
+                              actor_lr = 1e-6, critic_lr= 1e-6)
+                            #   actor_lr = 4e-8, critic_lr= 4e-8)
+                            #   actor_lr = 1e-7, critic_lr= 1e-7)
         self.total_reward = 0
 
         # self.timer_model_save = self.create_timer(100, self.save_model)
@@ -150,7 +152,7 @@ class TD3_ROS(Node):
             new_state = torch.tensor(self.state, dtype=torch.float32).unsqueeze(0)
             new_error_state = torch.tensor(self.error_state, dtype=torch.float32).unsqueeze(0)
             #action for the next round
-            action = self.model.select_action(new_state, new_error_state, noise_std= 0.05)
+            action = self.model.select_action(new_state, new_error_state, noise_std= 0.1)
             msg = Float64MultiArray()
             msg.data = action.detach().cpu().numpy().flatten().tolist()                   
             self.thruster_pub.publish(msg)
@@ -192,30 +194,30 @@ class TD3_ROS(Node):
         w_z = 3.0
         w_pitch = 1.0
         w_yaw = 1.0
-        w_u = 5.0
+        w_u = 10.0
         # Create diagonal weight matrix W
-        # W = torch.diag(torch.tensor([w_z, w_pitch, w_yaw, w_u]))
+        W = torch.diag(torch.tensor([w_z, w_pitch, w_yaw, w_u]))
         # Compute quadratic form: error^T * W * error -> scalar tensor
-        # error_reward = torch.matmul(error.T, torch.matmul(W, error)).item()  # shape [1, 1]
+        error_reward = torch.matmul(new_error.T, torch.matmul(W, new_error)).item()  # shape [1, 1]
 
-        W = torch.tensor([w_z, w_pitch, w_yaw, w_u])
-        abs_error = torch.abs(new_error)
-        error_reward = torch.sum(W * abs_error).item()
+        # W = torch.tensor([w_z, w_pitch, w_yaw, w_u])
+        # abs_error = torch.abs(new_error)
+        # error_reward = torch.sum(W * abs_error).item()
 
 
-        # #error reduction reward
-        W = torch.tensor([1, 1, 1, 1])
-        error_sum = torch.sum(W * current_error).item()
-        new_error_sum = torch.sum(W * new_error).item()
+        # # #error reduction reward
+        # W = torch.tensor([w_z, w_pitch, w_yaw, w_u])
+        # error_sum = torch.sum(W * current_error).item()
+        # new_error_sum = torch.sum(W * new_error).item()
 
-        # # Reward is reduction in weighted error
-        error_reduction_reward = (error_sum - new_error_sum)
+        # # # Reward is reduction in weighted error
+        # error_reduction_reward = error_sum - new_error_sum
         # print(current_error)
         # print(new_error)
         # print(current_error - new_error)
         
         # Combine both: negative reward means we want to minimize both
-        reward = -error_reward + error_reduction_reward  # scale smoothness with a factor
+        reward = np.exp(-0.5 * (error_reward ** 2) / (2 ** 2))
         return reward
 
 

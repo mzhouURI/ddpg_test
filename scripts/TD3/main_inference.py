@@ -62,7 +62,9 @@ class DDPG_ROS(Node):
     
         self.thruster_pub = self.create_publisher(Float64MultiArray, '/mvp2_test_robot/stonefish/thruster_command', 5)
 
-        self.model.load_state_dict(torch.load("model/actor.pth"))
+        # self.model.load_state_dict(torch.load("model/actor.pth"))
+        self.model.load_state_dict(torch.load("05-03-siamese.pth"))
+
         self.model.eval()
 
         self.timer_pub = self.create_timer(0.5, self.step)

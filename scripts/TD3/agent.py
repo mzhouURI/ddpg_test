@@ -96,7 +96,7 @@ class TD3Agent:
             target_q2 = target_q2.squeeze(1)  # [64]
             target_q = reward + (1 - done) * gamma * torch.min(target_q1, target_q2)
             target_q = target_q.unsqueeze(1)
-            target_q = target_q.clamp(-10, 10)
+            # target_q = target_q.clamp(-10, 10)
         # Update the critics
         
         state = state.squeeze(1)
@@ -107,6 +107,12 @@ class TD3Agent:
         q2 = self.critic2(state, error_state, action)
         critic1_loss = F.mse_loss(q1, target_q)
         critic2_loss = F.mse_loss(q2, target_q)
+
+        print(f"Average Q1: {q1.mean().item():.4f}",
+              f"Average Q2: {q2.mean().item():.4f}",
+              f"Average TQ: {target_q.mean().item():.4f}",
+              f"reward: {reward.mean().item():.4f}")
+
 
         # Optimize the critics
         self.critic_optimizer.zero_grad()

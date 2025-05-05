@@ -1,6 +1,7 @@
 import time
 import numpy as np
-from agent import TD3Agent
+from agent import PPOAgent
+from model import ActorCritic
 import rclpy
 from rclpy.node import Node
 from mvp_msgs.msg import ControlProcess
@@ -24,7 +25,7 @@ class TD3_ROS(Node):
 
         self.set_point_pub = self.create_publisher(ControlProcess, '/mvp2_test_robot/controller/process/set_point', 3)
         
-        self.loss_pub = self.create_publisher(Float64MultiArray, '/training/loss',10)
+        self.loss_pub = self.create_publisher(Float64, '/training/loss',10)
         self.total_reward_pub = self.create_publisher(Float64, '/training/episode_reward', 10)
                  #initial set point
         self.set_point = ControlProcess()
@@ -43,7 +44,7 @@ class TD3_ROS(Node):
         ##setting mode
         self.training = True
         self.training_episode = 0
-        self.batch_size = 128
+        self.batch_size = 32
         self.batch_warmup_size =self.batch_size*1
         self.set_point_update_flag = False
         state = {
@@ -57,17 +58,15 @@ class TD3_ROS(Node):
             'euler': (0,0), # Quaternion (x, y, z, w)
             'u': (0)
         }
+
         self.state = self.flatten_state(state)
         self.error_state = self.flatten_state(error_state)
         self.prev_action = torch.zeros(4)
         self.prev_error_state = torch.zeros(len(self.error_state))
         self.prev_state = torch.zeros(len(self.state))
         device = torch.device("cpu")
-        self.model = TD3Agent(len(self.state), len(self.error_state), 4, 1, device=device, 
-                              actor_ckpt='05-03-siamese.pth',
-                              actor_lr = 5e-7, critic_lr= 1e-6)
-                            #   actor_lr = 4e-8, critic_lr= 4e-8)
-                            #   actor_lr = 1e-7, critic_lr= 1e-7)
+
+        self.model = PPOAgent(len(self.state)+len(self.error_state), 4, hidden_dim=128, lr = 1e-6)
         self.total_reward = 0
 
         # self.timer_model_save = self.create_timer(100, self.save_model)
@@ -77,16 +76,6 @@ class TD3_ROS(Node):
         self.timer_setpoint_update = self.create_timer(60, self.set_point_update)
         self.timer_setpoint_pub = self.create_timer(1.0, self.set_point_publish)
         self.timer_pub = self.create_timer(0.5, self.step)
-
-        self.set_controller = self.create_client(SetBool, '/mvp2_test_robot/controller/set')  
-        self.active_controller(True)
-        
-    def active_controller(self, req: bool):
-        set_controller = SetBool.Request()
-        set_controller.data = req
-        future = self.set_controller.call_async(set_controller)
-        # rclpy.spin_until_future_complete(self, future)
-        return future.result()
     
     def set_point_update(self):
         print(f"episode reward = {self.total_reward}")
@@ -97,7 +86,7 @@ class TD3_ROS(Node):
         #update setpoint
         self.set_point.position.z = random.uniform(-5,-1)
         self.set_point.orientation.z = random.uniform(-3.14, 3.14)
-        self.set_point.velocity.x = random.uniform(0.0, 0.5)
+        self.set_point.velocity.x = random.uniform(0.0, 0.3)
         self.total_reward = 0
         self.set_point_update_flag = True
     
@@ -125,7 +114,7 @@ class TD3_ROS(Node):
         return np.array(flat, dtype=np.float32)
 
     def state_callback(self, msg):
-
+        
         state = {
             'z': (msg.position.z),
             'euler': (msg.orientation.x, msg.orientation.y, msg.orientation.z), 
@@ -147,48 +136,52 @@ class TD3_ROS(Node):
     # def save_model(self):
 
     def step(self):
-        try:
-            #new pose and error pose
-            new_state = torch.tensor(self.state, dtype=torch.float32).unsqueeze(0)
-            new_error_state = torch.tensor(self.error_state, dtype=torch.float32).unsqueeze(0)
-            #action for the next round
-            action = self.model.select_action(new_state, new_error_state, noise_std= 0.1)
-            msg = Float64MultiArray()
-            msg.data = action.detach().cpu().numpy().flatten().tolist()                   
-            self.thruster_pub.publish(msg)
+        # try:
+        #new pose and error pose
+        new_state = self.state
+        new_error_state =self.error_state
+        # new_state = torch.tensor(self.state, dtype=torch.float32).unsqueeze(0)
+        # new_error_state = torch.tensor(self.error_state, dtype=torch.float32).unsqueeze(0)
+        # state_np = torch.cat([new_state, new_error_state], dim=1)
+        state  = np.concatenate((new_state, new_error_state))
+        #action for the next round
+        action, logp, value = self.model.select_action(state)
+        msg = Float64MultiArray()
+        msg.data = action.tolist()                   
+        self.thruster_pub.publish(msg)
 
-                        
-            #error state reward
-            reward = self.calculate_reward(self.prev_error_state, new_error_state)
-            
-            done = False
-            if self.set_point_update_flag:
-                self.set_point_update_flag = False
-                print("skip this step")
-            else:
-                self.model.replay_buffer.add(self.prev_state, self.prev_error_state, self.prev_action.detach().cpu().numpy(), 
-                                             reward, new_state, new_error_state, done)
-            
-            # print(new_state - self.prev_state)
-            # print(new_error_state - self.prev_error_state)
-            ##update the prev error and action
-            self.prev_error_state = new_error_state
-            self.prev_state = new_state
-            self.prev_action = action
-
-            
-            if len(self.model.replay_buffer.buffer) > self.batch_warmup_size:  # Start training after enough experiences
-                c1_loss, c2_loss, actor_loss = self.model.train(batch_size=self.batch_size, gamma = 0.99)
-                msg = Float64MultiArray()
-                msg.data = [float(c1_loss), float(c2_loss), float(actor_loss)]
-                self.loss_pub.publish(msg)
-            self.total_reward  = self.total_reward + reward
-        except Exception as e:
-            self.get_logger().error(f"Error in step(): {e}")
+                    
+        #error state reward
+        error_state_torch = torch.tensor(new_error_state, dtype=torch.float32).unsqueeze(0)
+        reward = self.calculate_reward(self.prev_error_state, error_state_torch)
+        
+        done = False
+        if self.set_point_update_flag:
+            self.set_point_update_flag = False
+            print("skip this step")
+        else:
+            self.model.observe(self.prev_state, self.prev_action, reward, logp, value, done)
+        
+        # print(new_state - self.prev_state)
+        # print(new_error_state - self.prev_error_state)
+        ##update the prev error and action
+        self.prev_error_state = new_error_state
+        self.prev_state = state
+        self.prev_action = action
+        # --- Optional training trigger
+        if len(self.model.obs_buf) > self.batch_size:
+            print("training now")
+            loss = self.model.train()
+            msg = Float64()
+            msg.data = float(loss)
+            self.loss_pub.publish(msg)
+        self.total_reward  = self.total_reward + reward
+        # except Exception as e:
+        #     self.get_logger().error(f"Error in step(): {e}")
 
     def calculate_reward(self, error_pose, new_error_pose):
         new_error = new_error_pose.view(-1, 1)
-        current_error = error_pose.view(-1,1)
+        # current_error = error_pose.view(-1,1)
 
         # Define a weight matrix W: shape [3, 3]
         w_z = 3.0
@@ -219,9 +212,6 @@ class TD3_ROS(Node):
         # Combine both: negative reward means we want to minimize both
         reward = np.exp(-0.5 * (error_reward ** 2) / (2 ** 2))
         return reward
-
-
-
 
 def main(args=None):
 

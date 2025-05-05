@@ -19,7 +19,8 @@ class DDPG_ROS(Node):
         #initial set point
         
         self.subscription = self.create_subscription(ControlProcess, '/mvp2_test_robot/controller/process/value', self.state_callback, 1)
-        self.subscription2 = self.create_subscription(ControlProcess, '/mvp2_test_robot/controller/process/set_point', self.state_error_callback, 1)
+        self.subscription2 = self.create_subscription(ControlProcess, '/mvp2_test_robot/controller/process/error', self.state_error_callback, 1)
+        # self.subscription2 = self.create_subscription(ControlProcess, '/mvp2_test_robot/controller/process/set_point', self.state_error_callback, 1)
 
 
         self.set_point_pub = self.create_publisher(ControlProcess, '/mvp2_test_robot/controller/process/set_point', 3)
@@ -47,9 +48,10 @@ class DDPG_ROS(Node):
 
         state = {
             'z': (0),
-            'euler': (0,0,0), # Quaternion (x, y, z, w)
-            'uvw': (0,0,0),
-            'pqr': (0,0,0)
+            'euler': (0,0), # Quaternion (x, y, z, w)
+            # 'uvw': (0,0,0),
+            'uvw': (0),
+            # 'pqr': (0,0,0)
         }
         error_state = {
              'z': (0),
@@ -75,7 +77,7 @@ class DDPG_ROS(Node):
             self.model.eval()
 
         self.timer_pub = self.create_timer(0.5, self.step)
-        self.timer_setpoint_update = self.create_timer(60, self.set_point_update)
+        self.timer_setpoint_update = self.create_timer(5, self.set_point_update)
         self.timer_setpoint_pub = self.create_timer(1.0, self.set_point_publish)
 
         self.set_controller = self.create_client(SetBool, '/mvp2_test_robot/controller/set')  
@@ -138,13 +140,17 @@ class DDPG_ROS(Node):
 
     def state_callback(self, msg):
 
+        # state = {
+        #     'z': (msg.position.z),
+        #     'euler': (msg.orientation.x, msg.orientation.y, msg.orientation.z), 
+        #     'uvw': (msg.velocity.x, msg.velocity.y, msg.velocity.z),
+        #     'pqr': {msg.angular_rate.x, msg.angular_rate.y, msg.angular_rate.z}
+        # }
         state = {
             'z': (msg.position.z),
-            'euler': (msg.orientation.x, msg.orientation.y, msg.orientation.z), 
-            'uvw': (msg.velocity.x, msg.velocity.y, msg.velocity.z),
-            'pqr': {msg.angular_rate.x, msg.angular_rate.y, msg.angular_rate.z}
+            'euler': (msg.orientation.y, msg.orientation.z),  
+            'u': (msg.velocity.x)
         }
-       
         self.state = self.flatten_state(state)
 
     def state_error_callback(self, msg):
@@ -163,27 +169,33 @@ class DDPG_ROS(Node):
         self.trainer.save_model()
 
     def step(self):
-        try:
+        # try:
             current_pose = torch.tensor(self.state, dtype=torch.float32).unsqueeze(0)
             error_pose = torch.tensor(self.error_state, dtype=torch.float32).unsqueeze(0)
             thrust_cmd = torch.tensor(self.thrust_cmd[0], dtype=torch.float32).unsqueeze(0)
             # print(f"set_point: {error_pose}")
-            # pred_thrust_cmd = self.model(current_pose, error_pose)
+            pred_thrust_cmd = self.model(current_pose, error_pose)
+            self.buffer.append((thrust_cmd, pred_thrust_cmd, error_pose))
 
             if self.training: 
-                    pred_thrust_cmd = self.model(current_pose, error_pose)
-                    self.buffer.append((thrust_cmd, pred_thrust_cmd, error_pose))
+                if len(self.buffer)>=self.batch_size:
+                    thrust_batch = torch.stack([item[0] for item in self.buffer])
+                    thrust_pred_batch = torch.stack([item[1] for item in self.buffer])
+                    error_pose_batch = torch.stack([item[2] for item in self.buffer])
+                    loss = self.trainer.train(thrust_pred_batch, thrust_batch, error_pose_batch)
 
+                    # pred_thrust_cmd = self.model(current_pose, error_pose)
                     # print(pred_thrust_cmd.tolist())
                     # print(self.thrust_cmd[0])
-                    # loss = self.trainer.train(pred_thrust_cmd, self.thrust_cmd[0], error_pose)
-                    loss = self.trainer.train(pred_thrust_cmd, thrust_cmd[0], error_pose)
+                    # loss = self.trainer.train(pred_thrust_cmd, self.thrust_cmd[0])
+                    # loss = self.trainer.train(pred_thrust_cmd, thrust_cmd[0])
 
                     print(f"Training loss: {loss}")
                     data = Float64()
                     data.data = float(loss)
                     self.loss_pub.publish(data)
                     self.buffer.clear()
+
             if not self.training:
             #inference
                 with torch.no_grad():
@@ -193,8 +205,8 @@ class DDPG_ROS(Node):
                     msg.data = pred_thrust_cmd.detach().cpu().numpy().flatten().tolist()                   
                     self.thruster_pub.publish(msg)
 
-        except Exception as e:
-            self.get_logger().error(f"Error in step(): {e}")
+        # except Exception as e:
+        #     self.get_logger().error(f"Error in step(): {e}")
 
 def main(args=None):
 

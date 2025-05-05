@@ -19,8 +19,8 @@ class TD3_ROS(Node):
         #initial set point
         
         self.subscription = self.create_subscription(ControlProcess, '/mvp2_test_robot/controller/process/value', self.state_callback, 1)
-        # self.subscription2 = self.create_subscription(ControlProcess, '/mvp2_test_robot/controller/process/error', self.state_error_callback, 1)
-        self.subscription2 = self.create_subscription(ControlProcess, '/mvp2_test_robot/controller/process/set_point', self.state_error_callback, 1)
+        self.subscription2 = self.create_subscription(ControlProcess, '/mvp2_test_robot/controller/process/error', self.state_error_callback, 1)
+        # self.subscription2 = self.create_subscription(ControlProcess, '/mvp2_test_robot/controller/process/set_point', self.state_error_callback, 1)
 
 
 
@@ -48,11 +48,16 @@ class TD3_ROS(Node):
         self.batch_size = 64
         self.batch_warmup_size =self.batch_size*1
         self.set_point_update_flag = False
+        # state = {
+        #     'z': (0),
+        #     'euler': (0,0,0), # Quaternion (x, y, z, w)
+        #     'uvw': (0,0,0),
+        #     'pqr': (0,0,0)
+        # }
         state = {
             'z': (0),
-            'euler': (0,0,0), # Quaternion (x, y, z, w)
-            'uvw': (0,0,0),
-            'pqr': (0,0,0)
+            'euler': (0,0), # Quaternion (x, y, z, w)
+            'u': (0)
         }
         error_state = {
              'z': (0),
@@ -128,11 +133,16 @@ class TD3_ROS(Node):
 
     def state_callback(self, msg):
 
+        # state = {
+        #     'z': (msg.position.z),
+        #     'euler': (msg.orientation.x, msg.orientation.y, msg.orientation.z), 
+        #     'uvw': (msg.velocity.x, msg.velocity.y, msg.velocity.z),
+        #     'pqr': {msg.angular_rate.x, msg.angular_rate.y, msg.angular_rate.z}
+        # }
         state = {
             'z': (msg.position.z),
-            'euler': (msg.orientation.x, msg.orientation.y, msg.orientation.z), 
-            'uvw': (msg.velocity.x, msg.velocity.y, msg.velocity.z),
-            'pqr': {msg.angular_rate.x, msg.angular_rate.y, msg.angular_rate.z}
+            'euler': (msg.orientation.y, msg.orientation.z),  
+            'u': (msg.velocity.x)
         }
        
         self.state = self.flatten_state(state)

@@ -19,7 +19,7 @@ class DDPG_ROS(Node):
         #initial set point
         
         self.subscription = self.create_subscription(ControlProcess, '/mvp2_test_robot/controller/process/value', self.state_callback, 1)
-        self.subscription2 = self.create_subscription(ControlProcess, '/mvp2_test_robot/controller/process/error', self.state_error_callback, 1)
+        self.subscription2 = self.create_subscription(ControlProcess, '/mvp2_test_robot/controller/process/set_point', self.state_error_callback, 1)
 
 
         self.set_point_pub = self.create_publisher(ControlProcess, '/mvp2_test_robot/controller/process/set_point', 3)
@@ -109,7 +109,7 @@ class DDPG_ROS(Node):
         #update setpoint
         self.set_point.position.z = random.uniform(-5,-1)
         self.set_point.orientation.z = random.uniform(-3.14, 3.14)
-        self.set_point.velocity.x = random.uniform(0.0, 0.3)
+        self.set_point.velocity.x = random.uniform(0.0, 0.5)
         # self.set_point_pub.publish(self.set_point)
         # print(f"desired depth = {self.set_point.position.z}")
     
@@ -167,15 +167,15 @@ class DDPG_ROS(Node):
             current_pose = torch.tensor(self.state, dtype=torch.float32).unsqueeze(0)
             error_pose = torch.tensor(self.error_state, dtype=torch.float32).unsqueeze(0)
             thrust_cmd = torch.tensor(self.thrust_cmd[0], dtype=torch.float32).unsqueeze(0)
-            # print(thrust_cmd)
-            pred_thrust_cmd = self.model(current_pose, error_pose)
-            self.buffer.append((thrust_cmd, pred_thrust_cmd, error_pose))
+            # print(f"set_point: {error_pose}")
+            # pred_thrust_cmd = self.model(current_pose, error_pose)
 
             if self.training: 
-
                     pred_thrust_cmd = self.model(current_pose, error_pose)
-                    print(pred_thrust_cmd.tolist())
-                    print(self.thrust_cmd[0])
+                    self.buffer.append((thrust_cmd, pred_thrust_cmd, error_pose))
+
+                    # print(pred_thrust_cmd.tolist())
+                    # print(self.thrust_cmd[0])
                     # loss = self.trainer.train(pred_thrust_cmd, self.thrust_cmd[0], error_pose)
                     loss = self.trainer.train(pred_thrust_cmd, thrust_cmd[0], error_pose)
 

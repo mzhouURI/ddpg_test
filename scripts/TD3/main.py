@@ -19,7 +19,9 @@ class TD3_ROS(Node):
         #initial set point
         
         self.subscription = self.create_subscription(ControlProcess, '/mvp2_test_robot/controller/process/value', self.state_callback, 1)
-        self.subscription2 = self.create_subscription(ControlProcess, '/mvp2_test_robot/controller/process/error', self.state_error_callback, 1)
+        # self.subscription2 = self.create_subscription(ControlProcess, '/mvp2_test_robot/controller/process/error', self.state_error_callback, 1)
+        self.subscription2 = self.create_subscription(ControlProcess, '/mvp2_test_robot/controller/process/set_point', self.state_error_callback, 1)
+
 
 
         self.set_point_pub = self.create_publisher(ControlProcess, '/mvp2_test_robot/controller/process/set_point', 3)
@@ -43,7 +45,7 @@ class TD3_ROS(Node):
         ##setting mode
         self.training = True
         self.training_episode = 0
-        self.batch_size = 128
+        self.batch_size = 64
         self.batch_warmup_size =self.batch_size*1
         self.set_point_update_flag = False
         state = {
@@ -65,9 +67,9 @@ class TD3_ROS(Node):
         device = torch.device("cpu")
         self.model = TD3Agent(len(self.state), len(self.error_state), 4, 1, device=device, 
                               actor_ckpt='05-03-siamese.pth',
-                              actor_lr = 5e-7, critic_lr= 1e-6)
+                            #   actor_lr = 1e-7, critic_lr= 1e-6)
                             #   actor_lr = 4e-8, critic_lr= 4e-8)
-                            #   actor_lr = 1e-7, critic_lr= 1e-7)
+                              actor_lr = 1e-7, critic_lr= 1e-7, policy_delay=2)
         self.total_reward = 0
 
         # self.timer_model_save = self.create_timer(100, self.save_model)
@@ -151,8 +153,9 @@ class TD3_ROS(Node):
             #new pose and error pose
             new_state = torch.tensor(self.state, dtype=torch.float32).unsqueeze(0)
             new_error_state = torch.tensor(self.error_state, dtype=torch.float32).unsqueeze(0)
+            
             #action for the next round
-            action = self.model.select_action(new_state, new_error_state, noise_std= 0.1)
+            action = self.model.select_action(new_state, new_error_state, noise_std= 0.05)
             msg = Float64MultiArray()
             msg.data = action.detach().cpu().numpy().flatten().tolist()                   
             self.thruster_pub.publish(msg)
@@ -217,7 +220,8 @@ class TD3_ROS(Node):
         # print(current_error - new_error)
         
         # Combine both: negative reward means we want to minimize both
-        reward = np.exp(-0.5 * (error_reward ** 2) / (2 ** 2))
+        # reward = np.exp(-0.5 * (error_reward ** 2) / (2 ** 2))
+        reward = - error_reward
         return reward
 
 

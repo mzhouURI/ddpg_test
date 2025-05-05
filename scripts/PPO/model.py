@@ -7,16 +7,18 @@ class ActorCritic(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
                                 nn.Linear(state_dim, hidden_dim), 
-                                nn.Tanh()
+                                nn.ReLU()
                                 )
         self.pi = nn.Sequential(
                                 nn.Linear(hidden_dim, hidden_dim), 
-                                nn.Tanh(), 
+                                nn.ReLU(), 
+                                nn.Linear(hidden_dim, hidden_dim),
+                                nn.ReLU(), 
                                 nn.Linear(hidden_dim, act_dim)
                                 )
         self.v = nn.Sequential(
                                 nn.Linear(hidden_dim, hidden_dim), 
-                                nn.Tanh(), 
+                                nn.ReLU(), 
                                 nn.Linear(hidden_dim, 1)
                                 )
         self.log_std = nn.Parameter(torch.zeros(act_dim))

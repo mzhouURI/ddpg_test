@@ -90,7 +90,7 @@ class PPOAgent:
             entropy_bonus = entropy.mean()
 
             loss = policy_loss + 0.5 * value_loss - 0.01 * entropy_bonus
-            loss_stat.append(loss)
+            loss_stat.append(policy_loss)
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()

@@ -97,12 +97,14 @@ class OnlineTrainer:
             f"Shape mismatch: predicted {predicted_control.shape}, true {true_control.shape}"
         error_pose = np.array(error_pose)
         state_loss = np.linalg.norm(error_pose)
-        print(state_loss)
+        # print(state_loss)
         # Compute MSE loss between the batch of predicted and true control commands
         # min_val = np.min(error_pose, axis=0)  # shape (4,)
         # max_val = np.max(error_pose, axis=0)  # shape (4,)
         # scaled_error = (error_pose - min_val) / (max_val - min_val)
         # overall_mean = np.mean(scaled_error)               # total mean
+        print(predicted_control)
+        print(true_control)
         loss = self.loss_fn(predicted_control, true_control) + 0.0*state_loss # + 0.1*overall_mean
 
         # Perform the backward pass and optimize
